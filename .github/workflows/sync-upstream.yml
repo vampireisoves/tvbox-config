@@ -12,7 +12,7 @@ jobs:
     steps:
       # 检出本地main分支完整代码
       - name: 检出main分支代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.SYNC_PAT }}
           fetch-depth: 0
