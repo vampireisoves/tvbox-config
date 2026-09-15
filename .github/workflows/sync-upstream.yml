@@ -1,0 +1,67 @@
+name: 每日同步上游仓库
+permissions:
+  contents: write
+on:
+  schedule:
+    - cron: '0 2 * * *'   # UTC02:00 = 北京时间10:00 每日自动同步
+  workflow_dispatch:      # 支持网页手动一键触发同步
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      # 检出本地main分支完整代码
+      - name: 检出main分支代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.SYNC_PAT }}
+          fetch-depth: 0
+
+      # 单独备份自身同步脚本（核心：防止被上游覆盖删除）
+      - name: 备份专属同步脚本
+        run: |
+          mkdir -p /tmp/wf_backup
+          cp .github/workflows/sync-upstream.yml /tmp/wf_backup/sync-upstream.yml || true
+
+      # 拉取上游官方最新代码
+      - name: 拉取上游 qist/tvbox 源码
+        run: |
+          git remote add upstream https://github.com/qist/tvbox.git
+          git fetch upstream
+
+      # 强制全覆盖为上游最新代码
+      - name: 强制重置为上游最新版本
+        run: |
+          # 获取上游默认分支名称
+          UPSTREAM_BRANCH=$(git remote show upstream | grep 'HEAD branch' | awk '{print $NF}')
+          echo "上游默认分支: $UPSTREAM_BRANCH"
+          git reset --hard upstream/$UPSTREAM_BRANCH
+
+      # 恢复我们自己的同步脚本
+      - name: 恢复保留专属同步脚本
+        run: |
+          mkdir -p .github/workflows
+          cp /tmp/wf_backup/sync-upstream.yml .github/workflows/sync-upstream.yml
+          git add .github/workflows/sync-upstream.yml
+
+      # 提交脚本恢复变更（无变更则自动跳过）
+      - name: 提交保留的工作流文件
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "restore self sync workflow" || echo "无文件变更，无需提交"
+
+      # 推送更新到自己仓库
+      - name: 强制推送至main分支
+        run: |
+          git push origin main --force
+
+      # 自动清理旧记录，仅保留最新5条
+      - name: 清理旧Actions运行记录（保留5条）
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ secrets.SYNC_PAT }}
+          repository: ${{ github.repository }}
+          keep_minimum_runs: 5
+          delete_workflow_pattern: sync-upstream.yml
+          dry_run: false
